@@ -128,4 +128,9 @@ inline std::atomic<long long> g_host_refresh_ns{0};
 /// that is ~6 ms: each lands on a refresh with little wait (input lag) and evenly spaced.
 inline std::atomic<long long> g_host_phase_ns{-1};
 
+/// The refresh rate in Hz of the display showing the render window, 0 while unknown. The
+/// frontends set it where the OS has no compositor timing query for the host frame pacer
+/// (Linux); EDEN_NX2_HOST_REFRESH_HZ overrides it.
+inline std::atomic<double> g_display_refresh_hz{0.0};
+
 } // namespace VideoCommon::Nx2Perf
