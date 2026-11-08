@@ -1055,7 +1055,12 @@ bool KeplerCompute::BypassOotNetwork(u64 program_id, u64 native_key) {
     if (native_key == PrepassProgramKey || native_key == NetworkProgramKey) {
         return state->output_replaced.load(std::memory_order_relaxed);
     }
-    if (native_key != OutputProgramKey) {
+    // Debug override: EDEN_NX2_OOT_OUTPUT_KEY=<hex> selects another compute program as the output pass.
+    static const u64 output_key = [] {
+        const char* text = std::getenv("EDEN_NX2_OOT_OUTPUT_KEY");
+        return text ? std::strtoull(text, nullptr, 16) : OutputProgramKey;
+    }();
+    if (native_key != output_key) {
         return false;
     }
     // The copy needs the tonemapped image to be a B10G11R11 block-linear image of the output's size.
@@ -1063,8 +1068,8 @@ bool KeplerCompute::BypassOotNetwork(u64 program_id, u64 native_key) {
     if (!output || output->format != Texture::TextureFormat::B10G11R11 || output->Address() == 0 ||
         output->Address() == tonemapped.Address() || !output->IsBlockLinear() ||
         tonemapped.format != Tegra::RenderTargetFormat::B10G11R11_FLOAT ||
-        tonemapped.tile_mode.is_pitch_linear || tonemapped.width != output->Width() ||
-        tonemapped.height != output->Height()) {
+        tonemapped.tile_mode.is_pitch_linear || tonemapped.width == 0 ||
+        tonemapped.height == 0) {
         state->output_replaced.store(false, std::memory_order_relaxed);
         static bool warned = false;
         if (!std::exchange(warned, true)) {
@@ -1094,11 +1099,13 @@ bool KeplerCompute::BypassOotNetwork(u64 program_id, u64 native_key) {
     source.block_depth.Assign(tonemapped.tile_mode.block_depth);
     source.addr_upper = tonemapped.address_high;
     source.addr_lower = tonemapped.address_low;
+    source.width = tonemapped.width;
+    source.height = tonemapped.height;
     const s32 width = static_cast<s32>(output->Width());
     const s32 height = static_cast<s32>(output->Height());
     const Fermi2D::Config config{
         .operation = Fermi2D::Operation::SrcCopy,
-        .filter = Fermi2D::Filter::Point,
+        .filter = Fermi2D::Filter::Bilinear,
         .must_accelerate = true,
         .dst_x0 = 0,
         .dst_y0 = 0,
@@ -1106,8 +1113,8 @@ bool KeplerCompute::BypassOotNetwork(u64 program_id, u64 native_key) {
         .dst_y1 = height,
         .src_x0 = 0,
         .src_y0 = 0,
-        .src_x1 = width,
-        .src_y1 = height,
+        .src_x1 = static_cast<s32>(tonemapped.width),
+        .src_y1 = static_cast<s32>(tonemapped.height),
     };
     const bool copied = rasterizer->AccelerateSurfaceCopy(source, destination, config);
     state->output_replaced.store(copied, std::memory_order_relaxed);
